@@ -18,13 +18,10 @@ import ddpo_pytorch.rewards
 from ddpo_pytorch.diffusers_patch.pipeline_with_logprob import pipeline_with_logprob
 from ddpo_pytorch.diffusers_patch.ddim_with_logprob import ddim_step_with_logprob
 import torch
-import wandb
 from functools import partial
 import tqdm
-import tempfile
-from PIL import Image
 
-from ..stable_diffusion_1d import StableDiffusionPipeline1D
+from ..DDPODiffusionPipeline import DDPODiffusionPipeline1D
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -85,7 +82,7 @@ def main(_):
     set_seed(config.seed, device_specific=True)
 
     # load scheduler, tokenizer and models.
-    pipeline = StableDiffusionPipeline1D.from_pretrained(config.pretrained.model, revision=config.pretrained.revision)
+    pipeline = DDPODiffusionPipeline1D.from_pretrained(config.pretrained.model, revision=config.pretrained.revision)
     # freeze parameters of models to save more memory
     pipeline.unet.requires_grad_(not config.use_lora)
     # make the progress bar nicer

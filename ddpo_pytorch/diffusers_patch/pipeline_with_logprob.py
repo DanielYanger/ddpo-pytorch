@@ -8,17 +8,14 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
 
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
-    StableDiffusionPipeline1D,
-    rescale_noise_cfg,
-)
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import rescale_noise_cfg
 from diffusers.utils import randn_tensor
 from .ddim_with_logprob import ddim_step_with_logprob
-from ...stable_diffusion_1d import StableDiffusionPipeline1D
+from ...DDPODiffusionPipeline import DDPODiffusionPipeline1D
 
 @torch.no_grad()
 def pipeline_with_logprob(
-    self: StableDiffusionPipeline1D,
+    self: DDPODiffusionPipeline1D,
     batch_size: int = 50,
     num_inference_steps: int = 50,
     guidance_scale: float = 7.5,
