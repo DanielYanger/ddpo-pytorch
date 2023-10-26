@@ -14,7 +14,7 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
 )
 from diffusers.utils import randn_tensor
 from .ddim_with_logprob import ddim_step_with_logprob
-from ..stable_diffusion_1d import StableDiffusionPipeline1D
+from ...stable_diffusion_1d import StableDiffusionPipeline1D
 
 @torch.no_grad()
 def pipeline_with_logprob(
@@ -77,7 +77,6 @@ def pipeline_with_logprob(
         list of all the latents created during generation, and the third element is a list of all of the 
         corresponding log probabilities. 
     """
-    # TODO: 1. Check inputs
     self.check_inputs(self.unet.sample_size, callback_steps=callback_steps)
 
     # 2. Define call parameters
@@ -92,7 +91,6 @@ def pipeline_with_logprob(
     self.scheduler.set_timesteps(num_inference_steps, device=device)
     timesteps = self.scheduler.timesteps
     
-    # TODO: 5. Prepare latent variables
     num_channels_latents = self.unet.config.in_channels
     
     latents = self.prepare_latents(
