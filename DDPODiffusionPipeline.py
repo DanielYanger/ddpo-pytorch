@@ -5,18 +5,20 @@ from packaging import version
 from typing import List, Optional, Tuple, Union
 
 from diffusers.configuration_utils import FrozenDict
-from diffusers.loaders import FromCkptMixin, LoraLoaderMixin, TextualInversionLoaderMixin
+from diffusers.loaders import FromSingleFileMixin, LoraLoaderMixin, TextualInversionLoaderMixin
 from CustomUNet1D import CustomUnet1D
+# from diffusers.models import UNet1DModel
 from diffusers.schedulers import DDIMScheduler
 from diffusers.utils import (
     deprecate,
     is_accelerate_available,
     is_accelerate_version,
-    randn_tensor,
 )
-from diffusers.pipeline_utils import DiffusionPipeline, ImagePipelineOutput
 
-class DDPODiffusionPipeline1D(DiffusionPipeline, TextualInversionLoaderMixin, LoraLoaderMixin, FromCkptMixin):
+from diffusers.utils.torch_utils import randn_tensor
+from diffusers.pipelines import DiffusionPipeline, ImagePipelineOutput
+
+class DDPODiffusionPipeline1D(DiffusionPipeline, TextualInversionLoaderMixin, LoraLoaderMixin, FromSingleFileMixin):
     r"""
     Pipeline for text-to-image generation using Stable Diffusion.
 
@@ -60,19 +62,19 @@ class DDPODiffusionPipeline1D(DiffusionPipeline, TextualInversionLoaderMixin, Lo
     ):
         super().__init__()
 
-        if hasattr(scheduler.config, "steps_offset") and scheduler.config.steps_offset != 1:
-            deprecation_message = (
-                f"The configuration file of this scheduler: {scheduler} is outdated. `steps_offset`"
-                f" should be set to 1 instead of {scheduler.config.steps_offset}. Please make sure "
-                "to update the config accordingly as leaving `steps_offset` might led to incorrect results"
-                " in future versions. If you have downloaded this checkpoint from the Hugging Face Hub,"
-                " it would be very nice if you could open a Pull request for the `scheduler/scheduler_config.json`"
-                " file"
-            )
-            deprecate("steps_offset!=1", "1.0.0", deprecation_message, standard_warn=False)
-            new_config = dict(scheduler.config)
-            new_config["steps_offset"] = 1
-            scheduler._internal_dict = FrozenDict(new_config)
+        # if hasattr(scheduler.config, "steps_offset") and scheduler.config.steps_offset != 1:
+        #     deprecation_message = (
+        #         f"The configuration file of this scheduler: {scheduler} is outdated. `steps_offset`"
+        #         f" should be set to 1 instead of {scheduler.config.steps_offset}. Please make sure "
+        #         "to update the config accordingly as leaving `steps_offset` might led to incorrect results"
+        #         " in future versions. If you have downloaded this checkpoint from the Hugging Face Hub,"
+        #         " it would be very nice if you could open a Pull request for the `scheduler/scheduler_config.json`"
+        #         " file"
+        #     )
+        #     deprecate("steps_offset!=1", "1.0.0", deprecation_message, standard_warn=False)
+        #     new_config = dict(scheduler.config)
+        #     new_config["steps_offset"] = 1
+        #     scheduler._internal_dict = FrozenDict(new_config)
 
         if hasattr(scheduler.config, "clip_sample") and scheduler.config.clip_sample is True:
             deprecation_message = (
@@ -234,8 +236,7 @@ class DDPODiffusionPipeline1D(DiffusionPipeline, TextualInversionLoaderMixin, Lo
         batch_size: int = 1,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         num_inference_steps: int = 1000,
-        return_dict: bool = True,
-    ) -> Union[ImagePipelineOutput, Tuple]:
+    ):
         r"""
         The call function to the pipeline for generation.
 
@@ -274,15 +275,14 @@ class DDPODiffusionPipeline1D(DiffusionPipeline, TextualInversionLoaderMixin, Lo
                 returned where the first element is a list with the generated images
         """
         # Sample gaussian noise to begin loop
-        if isinstance(self.unet.config.sample_size, int):
+        if isinstance(self.unet.sample_size, int):
             image_shape = (
                 batch_size,
-                # TODO: Figure out if these are actually saved properly
-                self.unet.config.in_channels,
-                self.unet.config.sample_size,
+                self.unet.channels,
+                self.unet.sample_size,
             )
         else:
-            image_shape = (batch_size, self.unet.config.in_channels, self.unet.config.sample_size)
+            image_shape = (batch_size, self.unet.channels, self.unet.sample_size)
 
         if self.device.type == "mps":
             # randn does not work reproducibly on mps
@@ -301,10 +301,7 @@ class DDPODiffusionPipeline1D(DiffusionPipeline, TextualInversionLoaderMixin, Lo
             # 2. compute previous image: x_t -> x_t-1
             image = self.scheduler.step(model_output, t, image, generator=generator).prev_sample
 
+        print(image.shape)
         image = (image / 2 + 0.5).clamp(0, 1)
-        image = image.cpu().permute(0, 2, 3, 1).numpy()
 
-        if not return_dict:
-            return (image,)
-
-        return ImagePipelineOutput(images=image)
+        return image.cpu().numpy()

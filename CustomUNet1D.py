@@ -263,6 +263,7 @@ class CustomUnet1D(ModelMixin, ConfigMixin):
     def __init__(
         self,
         dim,
+        length,
         init_dim = None,
         out_dim = None,
         dim_mults=(1, 2, 4, 8),
@@ -280,7 +281,7 @@ class CustomUnet1D(ModelMixin, ConfigMixin):
         super().__init__()
 
         # determine dimensions
-
+        self.sample_size = length
         self.channels = channels
         self.self_condition = self_condition
         input_channels = channels * (2 if self_condition else 1)
@@ -351,6 +352,12 @@ class CustomUnet1D(ModelMixin, ConfigMixin):
         self.final_conv = nn.Conv1d(dim, self.out_dim, 1)
 
     def forward(self, x, time, x_self_cond = None):
+
+        if not torch.is_tensor(time):
+            time = torch.tensor([time], dtype=torch.long, device=x.device)
+        elif torch.is_tensor(time) and len(time.shape) == 0:
+            time = time[None].to(x.device)
+
         if self.self_condition:
             x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
             x = torch.cat((x_self_cond, x), dim = 1)

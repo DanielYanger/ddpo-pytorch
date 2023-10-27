@@ -11,6 +11,9 @@
 .idea/**/usage.statistics.xml
 .idea/**/dictionaries
 .idea/**/shelf
+ddpm-model-64
+Custom_UNet_Model
+nohup.out
 
 # AWS User-specific
 .idea/**/aws.xml

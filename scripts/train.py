@@ -22,6 +22,7 @@ from functools import partial
 import tqdm
 
 from ..DDPODiffusionPipeline import DDPODiffusionPipeline1D
+from ..protein_generator import Protein, ProteinReward
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -199,8 +200,8 @@ def main(_):
     )
 
     # prepare prompt and reward fn
-    prompt_fn = getattr(ddpo_pytorch.prompts, config.prompt_fn)
-    reward_fn = getattr(ddpo_pytorch.rewards, config.reward_fn)()
+    protein_reward = ProteinReward(Protein(config.protein), 'G')
+    reward_fn = protein_reward.maximize_base
 
     # for some reason, autocast is necessary for non-lora training but for lora training it isn't necessary and it uses
     # more memory
@@ -317,7 +318,6 @@ def main(_):
         )
 
         del samples["rewards"]
-        del samples["prompt_ids"]
 
         total_batch_size, num_timesteps = samples["timesteps"].shape
         assert total_batch_size == config.sample.batch_size * config.sample.num_batches_per_epoch
