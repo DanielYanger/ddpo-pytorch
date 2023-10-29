@@ -1,41 +1,61 @@
+# from diffusers.pipelines import StableDiffusionPipeline
 # from diffusers.models import UNet1DModel
+from DDPODiffusionPipeline import DDPODiffusionPipeline1D
 from CustomUNet1D import CustomUnet1D
-from diffusers.utils.torch_utils import randn_tensor
-import torch as t
 from diffusers.schedulers import DDIMScheduler
-
-import torch
+from diffusers.utils.torch_utils import randn_tensor
 from protein_generator import Protein
-import math
-import matplotlib.pyplot as plt
+from diffusers_patch.pipeline_with_logprob import pipeline_with_logprob
+# pipeline = DDPODiffusionPipeline1D.from_pretrained("runwayml/stable-diffusion-v1-5", revision="main")
+
+# pipeline.unet = CustomUnet1D(8, 1000)
+
+# pipeline = DDPODiffusionPipeline1D(
+#     CustomUnet1D(8,1000),
+#     DDIMScheduler()
+# )
+
+unet = CustomUnet1D.from_pretrained("./Custom_UNet_Model/unet")
+scheduler = DDIMScheduler(
+            num_train_timesteps=1000, 
+            clip_sample = False,
+        )
+
+# image = randn_tensor((16,3,1000))
+
+# scheduler.set_timesteps(100)
+
+# for i,t in enumerate(scheduler.timesteps):
+#     print(i, t)
+#     # 1. predict noise model_output
+#     model_output = unet(image, t).sample
+
+#     # 2. compute previous image: x_t -> x_t-1
+#     image = scheduler.step(model_output, t, image).prev_sample
+
+# image = (image / 2 + 0.5).clamp(0, 1)
+# image = image.cpu().detach().numpy()
+# processed = (image * 4).round().astype("uint8")
 
 protein_seq = "CPEEWEWNRSVMSVHNLCWQQAVDLGLWWILVPMIGGMIYMRQPLHRWLASSFKVFAIYVSIGGQVKRWPVVRFYSMEVWDYLWGYNYYELCIVKCGNYEEKLNIYTDMNRANWPLQFKSWKGGFKGSQYKHAKGTQLRGVSWSRRDTGFCDTMRMRLDWKISWTKHAMIQQRRLFQCSVKFKCFAIGGKEKWWCPMGGKHRGEPLPPKNYCPMVEHYIWFWYFGLFVKRRQDNTRLQKLICLILDNFPCIDNNYDTCYTIEMPDLLCATEQNQCRDMDCYKHPREACIECEGCEPDTWGVSDNTNNKFGICFHRTPQKGLQSTEEIRGDPRGLYKTRGGLMDGWYVNAYFHFTQFHFYDWLEKCCMGIFQEYCMVHEYHANVIIGKVYRQQMCPGYYWKTAMPKFWWHIFNLPSKEITQFIKEVNQYLESQSDTKIKCEAKKGTRRLSFLNCVLLELYCDRDIQMECQRWVRKPWHNQHFSNLRFAGTYSWDQQLRYNTATAAVIKNTASVFTEWCRDLSKTPAMGRFATEAKAGNFKAWKMAHCKRVAPLKKMCQFEFQDVSNWAEFVRDWEFSHREWRAEFVNDLIPDINKLPQSSNTHISNKCYDQNQWTIMIEHAQPMDYMHTGQIKKVMSVGHGMYYPHCISQITWINSFIDTANTKDDHMPSQQRVPSTTSNEHKRYVAMFFSVVYGNTKFNWGNPGHHKPHAPLHTALQNFNTFFFAYTVPGRMHYWWHHVHYLWLPDFWCLCSMKDWCHHSQSKRYGVPLSQYEVDGCQDVWRMQKNMDTQFVLNWLDSGRAQGSACTEINPCPKVKMNSPCQNFHSRMWFRMRKPHLGVEFLIPNDGAKNFFLVDFCIFMMGCCMSRNVKPVMGTPCPHMYLSNHQTVQLIMDQNRFQERAIWYANDRQIDWLHNAVETTAYTYTTWRHEGHLDVLRADVVMWHFSWDVFYYCVQWFQIMNWFHDNGNVHLVSWYLSNAAYKEYSFFVTMQMKAPVQSIS"
 protein = Protein(protein_seq)
 
-total_error = 0
+from lucid_rain_unet_trainer import GaussianDiffusion1D
 
-error_plot = []
-individual_error = []
-uniqueness = []
+diffusion = GaussianDiffusion1D(
+    model = unet,
+    seq_length = 1000,
+    timesteps = 1000,
+    objective = 'pred_v'
+)
 
-tensor = torch.load("Custom_UNet_Model/sample-6.png")
-tensor_error = 0
-error_count = 0
-for seq in tensor:
-    print(seq)
-    error = protein.validate_sequence(seq)
-    print(error)
-    total_error+=error
-    tensor_error+=error
-    if error > 0:
-        error_count += 1
-error_plot.append(tensor_error)
-individual_error.append(error_count/len(tensor))
+images, latents, log_probs = pipeline_with_logprob(
+    DDPODiffusionPipeline1D(unet, scheduler)
+)
 
-# reshaped_tensor = tensor.view(len(tensor), -1)
-# unique_rows, _ = torch.unique(reshaped_tensor, dim=0, return_inverse=True)
-# uniqueness.append(unique_rows.size(0)/len(tensor))
 
-print(error_plot)
-print(individual_error)
-# print(uniqueness)
+
+for image in images:
+    print(protein.validate_sequence(image))
+
+print(protein.maximize_base(images))

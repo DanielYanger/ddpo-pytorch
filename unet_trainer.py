@@ -573,7 +573,7 @@ def main(args):
                     scheduler=noise_scheduler,
                 )
 
-                pipeline.save_pretrained(args.output_dir)
+                pipeline.save_pretrained(args.output_dir, safe_serialization=False)
 
                 if args.use_ema:
                     ema_model.restore(unet.parameters())

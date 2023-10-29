@@ -10,7 +10,7 @@ from typing import Optional, Tuple, Union
 import math
 import torch
 
-from diffusers.utils import randn_tensor
+from diffusers.utils.torch_utils import randn_tensor
 from diffusers.schedulers.scheduling_ddim import DDIMSchedulerOutput, DDIMScheduler
 
 
@@ -149,7 +149,7 @@ def ddim_step_with_logprob(
 
     if prev_sample is None:
         variance_noise = randn_tensor(
-            model_output.shape, generator=generator, device=model_output.device, dtype=model_output.dtype
+            shape=model_output.shape, generator=generator, device=model_output.device, dtype=model_output.dtype
         )
         prev_sample = prev_sample_mean + std_dev_t * variance_noise
 

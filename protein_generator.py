@@ -71,6 +71,42 @@ class Protein:
                 mismatch+=1
         return mismatch
     
+    def maximize_base(self, seq):
+        # seq = (seq.cpu().numpy().transpose()*4.0).round()
+        # mismatch = 0
+        # count = 0
+        # incorrect = False
+        # for codon, amino_acid, i in zip(seq, self.sequence, range(len(seq))):
+        #     try:
+        #         codon_str = self.base_mapping[codon[0]]+self.base_mapping[codon[1]]+self.base_mapping[codon[2]]
+        #         if not self.codon_table.forward_table[codon_str] == amino_acid:
+        #             mismatch+=1
+        #             incorrect = True
+        #         else:
+        #             count+=codon_str.count('G')
+        #     except KeyError:
+        #         mismatch+=1
+        #         incorrect = True
+        # return mismatch, count if not incorrect else 0
+    
+        seq = (seq.cpu().numpy()*4.0).round()
+        reward = []
+        for sequence in seq:
+            sequence = sequence.transpose()
+            count = 0
+            for codon, amino_acid in zip(sequence, self.sequence):
+                try:
+                    codon_str = self.base_mapping[codon[0]]+self.base_mapping[codon[1]]+self.base_mapping[codon[2]]
+                    if not self.codon_table.forward_table[codon_str] == amino_acid:
+                        count = 0
+                        break
+                    count+=codon_str.count('G')
+                except KeyError:
+                    count = 0
+                    break
+            reward.append(count)
+        return t.tensor(reward)
+
 
 class ProteinReward:
     def __init__(self, protein: Protein, base) -> None:
@@ -78,18 +114,20 @@ class ProteinReward:
         self.protein = protein
 
     def maximize_base(self, sequence: t.Tensor) -> t.Tensor:
-        seq = (sequence.cpu().detach().numpy().transpose()*4.0).round()
-        print(seq)
+        seq = (sequence.cpu().numpy().transpose()*4.0).round()
         reward = []
         for sequence in seq:
             count = 0
-            for codon, amino_acid, i in zip(sequence, self.protein.sequence, range(len(sequence))):
+            for codon, amino_acid in zip(sequence, self.protein.sequence):
                 try:
                     codon_str = self.protein.base_mapping[codon[0]]+self.protein.base_mapping[codon[1]]+self.protein.base_mapping[codon[2]]
                     if not self.protein.codon_table.forward_table[codon_str] == amino_acid:
-                        reward.append(0)
+                        count = 0
+                        break
                     count+=codon_str.count(self.base)
                 except KeyError:
-                    reward.append(0)
+                    count = 0
+                    break
             reward.append(count)
+
         return t.tensor(reward)

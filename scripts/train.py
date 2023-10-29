@@ -5,6 +5,7 @@ import datetime
 from concurrent import futures
 import time
 from absl import app, flags
+from lucid_rain_unet_trainer import GaussianDiffusion1D
 from ml_collections import config_flags
 from accelerate import Accelerator
 from accelerate.utils import set_seed, ProjectConfiguration
@@ -13,16 +14,14 @@ from diffusers import DDIMScheduler, UNet1DModel
 from diffusers.loaders import AttnProcsLayers
 from diffusers.models.attention_processor import LoRAAttnProcessor
 import numpy as np
-import ddpo_pytorch.prompts
-import ddpo_pytorch.rewards
-from ddpo_pytorch.diffusers_patch.pipeline_with_logprob import pipeline_with_logprob
-from ddpo_pytorch.diffusers_patch.ddim_with_logprob import ddim_step_with_logprob
+from diffusers_patch.pipeline_with_logprob import pipeline_with_logprob
+from diffusers_patch.ddim_with_logprob import ddim_step_with_logprob
 import torch
 from functools import partial
 import tqdm
 
-from ..DDPODiffusionPipeline import DDPODiffusionPipeline1D
-from ..protein_generator import Protein, ProteinReward
+from DDPODiffusionPipeline import DDPODiffusionPipeline1D
+from protein_generator import Protein, ProteinReward
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -84,6 +83,7 @@ def main(_):
 
     # load scheduler, tokenizer and models.
     pipeline = DDPODiffusionPipeline1D.from_pretrained(config.pretrained.model, revision=config.pretrained.revision)
+
     # freeze parameters of models to save more memory
     pipeline.unet.requires_grad_(not config.use_lora)
     # make the progress bar nicer
@@ -94,8 +94,6 @@ def main(_):
         desc="Timestep",
         dynamic_ncols=True,
     )
-
-    pipeline.scheduler = DDIMScheduler.from_config(pipeline.scheduler.config)
 
     # For mixed precision training we cast all non-trainable weigths (vae, non-lora text_encoder and non-lora unet) to half-precision
     # as these weights are only used for inference, keeping weights in full precision is not required.
@@ -200,21 +198,20 @@ def main(_):
     )
 
     # prepare prompt and reward fn
-    protein_reward = ProteinReward(Protein(config.protein), 'G')
-    reward_fn = protein_reward.maximize_base
+    protein = Protein("CPEEWEWNRSVMSVHNLCWQQAVDLGLWWILVPMIGGMIYMRQPLHRWLASSFKVFAIYVSIGGQVKRWPVVRFYSMEVWDYLWGYNYYELCIVKCGNYEEKLNIYTDMNRANWPLQFKSWKGGFKGSQYKHAKGTQLRGVSWSRRDTGFCDTMRMRLDWKISWTKHAMIQQRRLFQCSVKFKCFAIGGKEKWWCPMGGKHRGEPLPPKNYCPMVEHYIWFWYFGLFVKRRQDNTRLQKLICLILDNFPCIDNNYDTCYTIEMPDLLCATEQNQCRDMDCYKHPREACIECEGCEPDTWGVSDNTNNKFGICFHRTPQKGLQSTEEIRGDPRGLYKTRGGLMDGWYVNAYFHFTQFHFYDWLEKCCMGIFQEYCMVHEYHANVIIGKVYRQQMCPGYYWKTAMPKFWWHIFNLPSKEITQFIKEVNQYLESQSDTKIKCEAKKGTRRLSFLNCVLLELYCDRDIQMECQRWVRKPWHNQHFSNLRFAGTYSWDQQLRYNTATAAVIKNTASVFTEWCRDLSKTPAMGRFATEAKAGNFKAWKMAHCKRVAPLKKMCQFEFQDVSNWAEFVRDWEFSHREWRAEFVNDLIPDINKLPQSSNTHISNKCYDQNQWTIMIEHAQPMDYMHTGQIKKVMSVGHGMYYPHCISQITWINSFIDTANTKDDHMPSQQRVPSTTSNEHKRYVAMFFSVVYGNTKFNWGNPGHHKPHAPLHTALQNFNTFFFAYTVPGRMHYWWHHVHYLWLPDFWCLCSMKDWCHHSQSKRYGVPLSQYEVDGCQDVWRMQKNMDTQFVLNWLDSGRAQGSACTEINPCPKVKMNSPCQNFHSRMWFRMRKPHLGVEFLIPNDGAKNFFLVDFCIFMMGCCMSRNVKPVMGTPCPHMYLSNHQTVQLIMDQNRFQERAIWYANDRQIDWLHNAVETTAYTYTTWRHEGHLDVLRADVVMWHFSWDVFYYCVQWFQIMNWFHDNGNVHLVSWYLSNAAYKEYSFFVTMQMKAPVQSIS")
+    reward_fn = protein.maximize_base
 
     # for some reason, autocast is necessary for non-lora training but for lora training it isn't necessary and it uses
     # more memory
     autocast = contextlib.nullcontext if config.use_lora else accelerator.autocast
     # autocast = accelerator.autocast
-
+    
     # Prepare everything with our `accelerator`.
     unet, optimizer = accelerator.prepare(unet, optimizer)
 
     # executor to perform callbacks asynchronously. this is beneficial for the llava callbacks which makes a request to a
     # remote server running llava inference.
     executor = futures.ThreadPoolExecutor(max_workers=2)
-
     # Train!
     samples_per_epoch = config.sample.batch_size * accelerator.num_processes * config.sample.num_batches_per_epoch
     total_train_batch_size = (
@@ -257,14 +254,13 @@ def main(_):
 
             # sample
             with autocast():
-                #TODO: Verify that latent is ok instead of pt
-                images, _, latents, log_probs = pipeline_with_logprob(
+                images, latents, log_probs = pipeline_with_logprob(
                     pipeline,
-                    batch_size = 50,
-                    num_inference_steps=config.sample.num_steps,
-                    guidance_scale=config.sample.guidance_scale,
-                    eta=config.sample.eta,
-                    output_type="latent",
+                    # batch_size = 10,
+                    # num_inference_steps=config.sample.num_steps,
+                    # guidance_scale=config.sample.guidance_scale,
+                    # eta=config.sample.eta,
+                    # output_type="latent",
                 )
 
             latents = torch.stack(latents, dim=1)  # (batch_size, num_steps + 1, 4, 64, 64)
@@ -275,7 +271,7 @@ def main(_):
             rewards = executor.submit(reward_fn, images)
             # yield to to make sure reward computation starts
             time.sleep(0)
-
+            print(rewards.result())
             samples.append(
                 {
                     "timesteps": timesteps,
@@ -359,22 +355,34 @@ def main(_):
                     leave=False,
                     disable=not accelerator.is_local_main_process,
                 ):
+                    
+                    diffusion = GaussianDiffusion1D(
+                        model = unet,
+                        seq_length = 1000,
+                        timesteps = 1000,
+                        objective = 'pred_v'
+                    )
+
                     with accelerator.accumulate(unet):
                         with autocast():
                             if config.train.cfg:
-                                noise_pred = unet(
-                                    torch.cat([sample["latents"][:, j]] * 2),
-                                    torch.cat([sample["timesteps"][:, j]] * 2),
-                                ).sample
+                                # TODO
+                                # noise_pred = unet(
+                                #     torch.cat([sample["latents"][:, j]] * 2),
+                                #     torch.cat([sample["timesteps"][:, j]] * 2),
+                                # ).sample
+                                noise_pred, _ = diffusion.model_predictions(torch.cat([sample["latents"][:, j]] * 2), torch.cat([sample["timesteps"][:, j]] * 2))
                                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                                 noise_pred = noise_pred_uncond + config.sample.guidance_scale * (
                                     noise_pred_text - noise_pred_uncond
                                 )
                             else:
-                                noise_pred = unet(
-                                    sample["latents"][:, j],
-                                    sample["timesteps"][:, j],
-                                ).sample
+                                # TODO
+                                # noise_pred = unet(
+                                #     sample["latents"][:, j],
+                                #     sample["timesteps"][:, j],
+                                # ).sample
+                                noise_pred, _ = diffusion.model_predictions(torch.cat([sample["latents"][:, j]]), torch.cat([sample["timesteps"][:, j]]))
                             # compute the log prob of next_latents given latents under the current model
                             _, log_prob = ddim_step_with_logprob(
                                 pipeline.scheduler,
@@ -428,7 +436,15 @@ def main(_):
             assert accelerator.sync_gradients
 
         if epoch != 0 and epoch % config.save_freq == 0 and accelerator.is_main_process:
-            accelerator.save_state()
+            #TODO Save
+            save_unet = accelerator.unwrap_model(unet)
+            
+            pipeline = DDPODiffusionPipeline1D(
+                unet=save_unet,
+                scheduler=DDIMScheduler(),
+            )
+            pipeline.save_pretrained("DDPO_Result")
+            # accelerator.save_state()
 
 
 if __name__ == "__main__":

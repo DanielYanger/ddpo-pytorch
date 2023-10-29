@@ -26,6 +26,9 @@ from DDPODiffusionPipeline import DDPODiffusionPipeline1D
 from diffusers import DDIMScheduler
 from protein_generator import Protein
 
+from diffusers.models.modeling_utils import ModelMixin
+from diffusers.configuration_utils import ConfigMixin
+
 # constants
 
 ModelPrediction =  namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start'])
@@ -110,7 +113,7 @@ def cosine_beta_schedule(timesteps, s = 0.008):
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 0.999)
 
-class GaussianDiffusion1D(nn.Module):
+class GaussianDiffusion1D(ModelMixin, ConfigMixin):
     def __init__(
         self,
         model: CustomUnet1D,
@@ -121,7 +124,8 @@ class GaussianDiffusion1D(nn.Module):
         objective = 'pred_noise',
         beta_schedule = 'cosine',
         ddim_sampling_eta = 0.,
-        auto_normalize = True
+        auto_normalize = True,
+        device = 'cuda:0'
     ):
         super().__init__()
         self.model = model
@@ -135,9 +139,9 @@ class GaussianDiffusion1D(nn.Module):
         assert objective in {'pred_noise', 'pred_x0', 'pred_v'}, 'objective must be either pred_noise (predict noise) or pred_x0 (predict image start) or pred_v (predict v [v-parameterization as defined in appendix D of progressive distillation paper, used in imagen-video successfully])'
 
         if beta_schedule == 'linear':
-            betas = linear_beta_schedule(timesteps)
+            betas = linear_beta_schedule(timesteps).to(device)
         elif beta_schedule == 'cosine':
-            betas = cosine_beta_schedule(timesteps)
+            betas = cosine_beta_schedule(timesteps).to(device)
         else:
             raise ValueError(f'unknown beta schedule {beta_schedule}')
 
@@ -497,7 +501,7 @@ class Trainer1D(object):
     def save(self, milestone):
         model = self.accelerator.unwrap_model(self.model)
         unet = model.model
-
+        
         pipeline = DDPODiffusionPipeline1D(
             unet=unet,
             scheduler=DDIMScheduler(),
@@ -592,18 +596,19 @@ trainer = Trainer1D(
 )
 
 if __name__ == '__main__':
-    trainer.train()
+    diffusion.save_pretrained("TESTING")
+    # trainer.train()
     
-    sampled_seq = diffusion.sample(batch_size = 1000)
-    torch.save(sampled_seq, "sampled_sequences.pt")
-    unique_rows, _ = torch.unique((sampled_seq*4).round(), dim=0, return_inverse=True)
-    print(unique_rows.size(0))
+    # sampled_seq = diffusion.sample(batch_size = 1000)
+    # torch.save(sampled_seq, "sampled_sequences.pt")
+    # unique_rows, _ = torch.unique((sampled_seq*4).round(), dim=0, return_inverse=True)
+    # print(unique_rows.size(0))
 
-    count = 0
-    for sample in sampled_seq.cpu():
-        for training_sample in (training_seq*4).round().cpu():
-            if torch.equal(sample, training_sample):
-                count+=1
-                break
+    # count = 0
+    # for sample in sampled_seq.cpu():
+    #     for training_sample in (training_seq*4).round().cpu():
+    #         if torch.equal(sample, training_sample):
+    #             count+=1
+    #             break
 
-    print(count)
+    # print(count)

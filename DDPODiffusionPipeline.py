@@ -5,7 +5,7 @@ from packaging import version
 from typing import List, Optional, Tuple, Union
 
 from diffusers.configuration_utils import FrozenDict
-from diffusers.loaders import FromSingleFileMixin, LoraLoaderMixin, TextualInversionLoaderMixin
+from diffusers.loaders import FromCkptMixin, LoraLoaderMixin, TextualInversionLoaderMixin
 from CustomUNet1D import CustomUnet1D
 # from diffusers.models import UNet1DModel
 from diffusers.schedulers import DDIMScheduler
@@ -18,7 +18,7 @@ from diffusers.utils import (
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.pipelines import DiffusionPipeline, ImagePipelineOutput
 
-class DDPODiffusionPipeline1D(DiffusionPipeline, TextualInversionLoaderMixin, LoraLoaderMixin, FromSingleFileMixin):
+class DDPODiffusionPipeline1D(DiffusionPipeline, TextualInversionLoaderMixin, LoraLoaderMixin, FromCkptMixin):
     r"""
     Pipeline for text-to-image generation using Stable Diffusion.
 
@@ -213,22 +213,6 @@ class DDPODiffusionPipeline1D(DiffusionPipeline, TextualInversionLoaderMixin, Lo
                 f" {type(callback_steps)}."
             )
 
-    def prepare_latents(scheduler, batch_size, num_channels_latents, length, dtype, device, generator, latents=None):
-        shape = (batch_size, num_channels_latents, length)
-        if isinstance(generator, list) and len(generator) != batch_size:
-            raise ValueError(
-                f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
-                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
-            )
-
-        if latents is None:
-            latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-        else:
-            latents = latents.to(device)
-
-        # scale the initial noise by the standard deviation required by the scheduler
-        latents = latents * scheduler.init_noise_sigma
-        return latents
     
     @torch.no_grad()
     def __call__(
@@ -301,7 +285,6 @@ class DDPODiffusionPipeline1D(DiffusionPipeline, TextualInversionLoaderMixin, Lo
             # 2. compute previous image: x_t -> x_t-1
             image = self.scheduler.step(model_output, t, image, generator=generator).prev_sample
 
-        print(image.shape)
         image = (image / 2 + 0.5).clamp(0, 1)
 
         return image.cpu().numpy()

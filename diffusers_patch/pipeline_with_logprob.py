@@ -9,14 +9,16 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import torch
 
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import rescale_noise_cfg
-from diffusers.utils import randn_tensor
+from diffusers.utils.torch_utils import randn_tensor
 from .ddim_with_logprob import ddim_step_with_logprob
-from ...DDPODiffusionPipeline import DDPODiffusionPipeline1D
+from DDPODiffusionPipeline import DDPODiffusionPipeline1D
+from lucid_rain_unet_trainer import GaussianDiffusion1D
+
 
 @torch.no_grad()
 def pipeline_with_logprob(
     self: DDPODiffusionPipeline1D,
-    batch_size: int = 50,
+    batch_size: int = 10,
     num_inference_steps: int = 50,
     guidance_scale: float = 7.5,
     eta: float = 0.0,
@@ -27,6 +29,7 @@ def pipeline_with_logprob(
     callback_steps: int = 1,
     cross_attention_kwargs: Optional[Dict[str, Any]] = None,
     guidance_rescale: float = 0.0,
+    data_type: str = "fp16",
 ):
     r"""
     Function invoked when calling the pipeline for generation.
@@ -88,16 +91,31 @@ def pipeline_with_logprob(
     self.scheduler.set_timesteps(num_inference_steps, device=device)
     timesteps = self.scheduler.timesteps
     
-    num_channels_latents = self.unet.config.in_channels
+    num_channels_latents = self.unet.channels
+
+    inference_dtype = torch.float32
+    # if data_type == "fp16":
+    #     inference_dtype = torch.float16
+    # elif data_type == "bf16":
+    #     inference_dtype = torch.bfloat16
     
-    latents = self.prepare_latents(
-        self.scheduler,
-        batch_size,
-        num_channels_latents,
-        self.unet.sample_size,
-        device,
-        generator,
-        latents,
+    latents = prepare_latents(
+        scheduler=self.scheduler,
+        batch_size=batch_size,
+        num_channels_latents=num_channels_latents,
+        length=self.unet.sample_size,
+        dtype = inference_dtype,
+        device=device,
+        generator=generator,
+        latents=latents,
+    )
+
+    diffusion = GaussianDiffusion1D(
+        model = self.unet,
+        seq_length = 1000,
+        timesteps = 1000,
+        objective = 'pred_v',
+        device=device
     )
 
     # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
@@ -114,12 +132,9 @@ def pipeline_with_logprob(
             latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
             # TODO: predict the noise residual
-            noise_pred = self.unet(
-                latent_model_input,
-                t,
-                cross_attention_kwargs=cross_attention_kwargs,
-                return_dict=False,
-            )[0]
+            # noise_pred = self.unet(latent_model_input,t).sample
+            time_cond = torch.full((latent_model_input.shape[0],), t, device=device, dtype=torch.long)
+            noise_pred, _ = diffusion.model_predictions(latent_model_input, time_cond)
 
             # perform guidance
             if do_classifier_free_guidance:
@@ -142,11 +157,8 @@ def pipeline_with_logprob(
                 if callback is not None and i % callback_steps == 0:
                     callback(i, t, latents)
 
-    image = latents
+    image = (latents / 2 + 0.5).clamp(0, 1)
 
-    do_denormalize = [True] * image.shape[0]
-
-    image = self.image_processor.postprocess(image, output_type=output_type, do_denormalize=do_denormalize)
 
     # Offload last model to CPU
     if hasattr(self, "final_offload_hook") and self.final_offload_hook is not None:
@@ -154,3 +166,19 @@ def pipeline_with_logprob(
 
     return image, all_latents, all_log_probs
 
+def prepare_latents(scheduler, batch_size, num_channels_latents, length, dtype, device, generator, latents=None):
+    shape = (batch_size, num_channels_latents, length)
+    if isinstance(generator, list) and len(generator) != batch_size:
+        raise ValueError(
+            f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
+            f" size of {batch_size}. Make sure the batch size matches the length of the generators."
+        )
+
+    if latents is None:
+        latents = randn_tensor(shape = shape, generator=generator, device=device, dtype=dtype, layout=None)
+    else:
+        latents = latents.to(device)
+
+    # scale the initial noise by the standard deviation required by the scheduler
+    latents = latents * scheduler.init_noise_sigma
+    return latents

@@ -13,9 +13,10 @@
 .idea/**/shelf
 ddpm-model-64
 Custom_UNet_Model
+DDPO_Result
 nohup.out
 training_data.pt
-
+sampled_sequences.pt
 # AWS User-specific
 .idea/**/aws.xml
 
